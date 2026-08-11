@@ -135,20 +135,35 @@ def get_currency_rates():
 
     text += "\n🪙 <b>Криптовалюты (USD):</b>\n"
 
-    # 4. Крипта через CoinGecko
+# 4. Крипта через Bybit (резерв: CoinGecko)
     try:
-        crypto_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd"
-        res_crypto = requests.get(crypto_url, headers=HEADERS, timeout=5).json()
+        # Пробуем через быструю Bybit API
+        symbols = {"BTCUSDT": "BTC (Bitcoin)", "ETHUSDT": "ETH (Ethereum)", "SOLUSDT": "SOL (Solana)"}
+        crypto_text = ""
+        
+        for sym, name in symbols.items():
+            url = f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={sym}"
+            res = requests.get(url, headers=HEADERS, timeout=3).json()
+            price = float(res['result']['list'][0]['lastPrice'])
+            crypto_text += f"• <b>{name}:</b> ${price:,.2f}\n"
+            
+        text += crypto_text
 
-        btc_price = res_crypto.get('bitcoin', {}).get('usd', 0)
-        eth_price = res_crypto.get('ethereum', {}).get('usd', 0)
-        sol_price = res_crypto.get('solana', {}).get('usd', 0)
-
-        text += f"• <b>BTC (Bitcoin):</b> ${btc_price:,.2f}\n"
-        text += f"• <b>ETH (Ethereum):</b> ${eth_price:,.2f}\n"
-        text += f"• <b>SOL (Solana):</b> ${sol_price:,.2f}\n"
     except Exception:
-        text += "• Не удалось загрузить курсы криптовалют\n"
+        # Если Bybit сбоит, пробуем CoinGecko
+        try:
+            crypto_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd"
+            res_crypto = requests.get(crypto_url, headers=HEADERS, timeout=5).json()
+
+            btc_price = res_crypto.get('bitcoin', {}).get('usd', 0)
+            eth_price = res_crypto.get('ethereum', {}).get('usd', 0)
+            sol_price = res_crypto.get('solana', {}).get('usd', 0)
+
+            text += f"• <b>BTC (Bitcoin):</b> ${btc_price:,.2f}\n"
+            text += f"• <b>ETH (Ethereum):</b> ${eth_price:,.2f}\n"
+            text += f"• <b>SOL (Solana):</b> ${sol_price:,.2f}\n"
+        except Exception:
+            text += "• Не удалось загрузить курсы криптовалют\n"
 
     return text + PARTNER_FOOTER
 
