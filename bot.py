@@ -135,35 +135,42 @@ def get_currency_rates():
 
     text += "\n🪙 <b>Криптовалюты (USD):</b>\n"
 
-# 4. Крипта через Bybit (резерв: CoinGecko)
+# 4. Криптовалюты (Bybit -> MEXC -> CoinGecko)
+    btc_price, eth_price, sol_price, xrp_price = 0.0, 0.0, 0.0, 0.0
+
+    # Попытка 1: Bybit
     try:
-        # Пробуем через быструю Bybit API
-        symbols = {"BTCUSDT": "BTC (Bitcoin)", "ETHUSDT": "ETH (Ethereum)", "SOLUSDT": "SOL (Solana)"}
-        crypto_text = ""
-        
-        for sym, name in symbols.items():
-            url = f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={sym}"
-            res = requests.get(url, headers=HEADERS, timeout=3).json()
-            price = float(res['result']['list'][0]['lastPrice'])
-            crypto_text += f"• <b>{name}:</b> ${price:,.2f}\n"
-            
-        text += crypto_text
+        req_btc = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT", timeout=3).json()
+        req_eth = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=ETHUSDT", timeout=3).json()
+        req_sol = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=SOLUSDT", timeout=3).json()
+        req_xrp = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=XRPUSDT", timeout=3).json()
 
+        btc_price = float(req_btc['result']['list'][0]['lastPrice'])
+        eth_price = float(req_eth['result']['list'][0]['lastPrice'])
+        sol_price = float(req_sol['result']['list'][0]['lastPrice'])
+        xrp_price = float(req_xrp['result']['list'][0]['lastPrice'])
     except Exception:
-        # Если Bybit сбоит, пробуем CoinGecko
+        # Попытка 2: MEXC (если Bybit не ответил)
         try:
-            crypto_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd"
-            res_crypto = requests.get(crypto_url, headers=HEADERS, timeout=5).json()
+            req_btc = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3).json()
+            req_eth = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT", timeout=3).json()
+            req_sol = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=SOLUSDT", timeout=3).json()
+            req_xrp = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=XRPUSDT", timeout=3).json()
 
-            btc_price = res_crypto.get('bitcoin', {}).get('usd', 0)
-            eth_price = res_crypto.get('ethereum', {}).get('usd', 0)
-            sol_price = res_crypto.get('solana', {}).get('usd', 0)
-
-            text += f"• <b>BTC (Bitcoin):</b> ${btc_price:,.2f}\n"
-            text += f"• <b>ETH (Ethereum):</b> ${eth_price:,.2f}\n"
-            text += f"• <b>SOL (Solana):</b> ${sol_price:,.2f}\n"
+            btc_price = float(req_btc['price'])
+            eth_price = float(req_eth['price'])
+            sol_price = float(req_sol['price'])
+            xrp_price = float(req_xrp['price'])
         except Exception:
-            text += "• Не удалось загрузить курсы криптовалют\n"
+            pass
+
+    if btc_price > 0:
+        text += f"• <b>BTC (Bitcoin):</b> ${btc_price:,.2f}\n"
+        text += f"• <b>ETH (Ethereum):</b> ${eth_price:,.2f}\n"
+        text += f"• <b>SOL (Solana):</b> ${sol_price:,.2f}\n"
+        text += f"• <b>XRP (Ripple):</b> ${xrp_price:,.4f}\n"
+    else:
+        text += "• Не удалось загрузить курсы криптовалют\n"
 
     return text + PARTNER_FOOTER
 
