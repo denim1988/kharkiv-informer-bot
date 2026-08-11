@@ -61,7 +61,10 @@ def get_weather_with_advice():
     for city, (lat, lon) in cities.items():
         try:
             url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&timezone=auto"
-            data = requests.get(url, headers=HEADERS, timeout=5).json()
+            # Делаем чистый запрос без аргумента headers
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            
             curr = data.get("current_weather", {})
             temp = curr.get("temperature", 20)
             wind = curr.get("windspeed", 0)
@@ -73,7 +76,8 @@ def get_weather_with_advice():
                 rain_expected = True
 
             response_text += f"📍 <b>{city}</b>\n• Температура: {temp}°C\n• Ветер: {wind} км/ч\n\n"
-        except Exception:
+        except Exception as e:
+            print(f"Ошибка погоды для {city}: {e}")
             response_text += f"📍 <b>{city}</b>: Не удалось получить данные.\n\n"
 
     if temps:
