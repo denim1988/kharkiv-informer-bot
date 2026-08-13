@@ -38,41 +38,41 @@ PARTNER_FOOTER = '\n\n— — — — — — — — — —\n📢 <b>Наш п
 
 # ==================== 1. ПОГОДА И СОВЕТЫ ====================
 def get_weather_with_advice():
-    cities = {
-        "Харьков": (50.0011, 36.2315),
-        "Чугуев": (49.8356, 36.6844),
-        "Харьковская область": (49.9935, 36.2304)
-    }
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
     response_text = "🌤 <b>ПОГОДА</b>\n\n"
+    
+    cities = {
+        "Харьков": "latitude=50.0011&longitude=36.2315",
+        "Чугуев": "latitude=49.8356&longitude=36.6844",
+        "Харьковская область": "latitude=49.9935&longitude=36.2304"
+    }
+
     temps = []
     winds = []
     rain_expected = False
 
-    for city, (lat, lon) in cities.items():
+    for city, coords in cities.items():
         try:
-            url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,weather_code&timezone=auto"
-            res = requests.get(url, headers=headers, timeout=5).json()
-            curr = res.get("current", {})
-            
-            temp = curr.get("temperature_2m", 20)
-            wind = curr.get("wind_speed_10m", 0)
-            code = curr.get("weather_code", 0)
+            url = f"https://api.open-meteo.com/v1/forecast?{coords}&current_weather=true"
+            res = requests.get(url, timeout=5).json()
+            curr = res.get("current_weather", {})
+
+            temp = round(float(curr.get("temperature", 0)))
+            wind = round(float(curr.get("windspeed", 0)))
+            code = int(curr.get("weathercode", 0))
 
             temps.append(temp)
             winds.append(wind)
-            if code in [51, 53, 55, 61, 63, 65, 80, 81, 82]:
+
+            # Коды осадков (дождь/морось/гроза)
+            if code in [51, 53, 55, 61, 63, 65, 80, 81, 82, 95]:
                 rain_expected = True
 
             response_text += f"📍 <b>{city}</b>\n• Температура: {temp}°C\n• Ветер: {wind} км/ч\n\n"
         except Exception as e:
-            print(f"Ошибка погоды {city}: {e}")
-            response_text += f"📍 <b>{city}</b>: Не удалось получить данные.\n\n"
+            print(f"Ошибка загрузки погоды ({city}): {e}")
+            response_text += f"📍 <b>{city}</b>: Не удалось получить данные\n\n"
 
+    # Формируем совет по одежде
     if temps:
         avg_temp = sum(temps) / len(temps)
         avg_wind = sum(winds) / len(winds)
@@ -93,7 +93,7 @@ def get_weather_with_advice():
             advice.append("☔ Ожидается дождь — возьми зонт!")
 
         advice_str = " ".join(advice)
-        response_text += f"💡 <b>Совет по одежде:</b> {advice_str}\n\n"
+        response_text += f"💡 <b>Совет по одежде:</b> {advice_str}"
 
     return response_text + PARTNER_FOOTER
 
