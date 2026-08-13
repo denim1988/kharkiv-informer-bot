@@ -123,7 +123,16 @@ def get_currency_rates():
     except Exception:
         text += "🇺🇸 <b>USD/UAH:</b> Ошибка загрузки\n"
 
-    # 2. Злотый (PLN) из НБУ
+    # 2. Евро (EUR) из НБУ
+    try:
+        res_cny = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=CNY&json", timeout=5).json()
+        if res_cny:
+            cny_rate = round(float(res_cny[0].get('rate')), 2)
+            text += f"🇨🇳 <b>EUR/UAH (Евро):</b> 1 EUR = {cny_rate} грн (НБУ)\n"
+    except Exception:
+        text += "🇨🇳 <b>EUR/UAH:</b> Ошибка загрузки\n"
+
+    # 3. Злотый (PLN) из НБУ
     try:
         res_pln = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=PLN&json", timeout=5).json()
         if res_pln:
@@ -132,7 +141,7 @@ def get_currency_rates():
     except Exception:
         text += "🇵🇱 <b>PLN/UAH:</b> Ошибка загрузки\n"
 
-    # 3. Юань (CNY) из НБУ
+    # 4. Юань (CNY) из НБУ
     try:
         res_cny = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=CNY&json", timeout=5).json()
         if res_cny:
