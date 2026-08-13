@@ -631,17 +631,6 @@ def get_kharkiv_events():
 
 def send_gosuslugi(chat_id):
 
-    keyboard = types.InlineKeyboardMarkup(
-        row_width=1
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "📋 Запись в ЦНАП",
-            url="https://dozvil.kh.ua/"
-        )
-    )
-
     keyboard.add(
         types.InlineKeyboardButton(
             "🏛 ЦНАП Харькова",
@@ -891,13 +880,6 @@ def send_zhkh(chat_id):
         types.InlineKeyboardButton(
             "🔥 Газ / Нафтогаз",
             url="https://gas.ua/"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🏙 Харьковский горсовет",
-            url="https://city.kharkiv.ua/"
         )
     )
 
