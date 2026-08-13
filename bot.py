@@ -53,6 +53,10 @@ def get_weather_with_advice():
         "Харьковская область": (49.9935, 36.2304)
     }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     response_text = "🌤 <b>ПОГОДА</b>\n\n"
     temps = []
     winds = []
@@ -60,15 +64,15 @@ def get_weather_with_advice():
 
     for city, (lat, lon) in cities.items():
         try:
-            url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&timezone=auto"
-            # Делаем чистый запрос без аргумента headers
-            response = requests.get(url, timeout=5)
-            data = response.json()
+            # Используем актуальный эндпоинт Open-Meteo
+            url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,weather_code&timezone=auto"
             
-            curr = data.get("current_weather", {})
-            temp = curr.get("temperature", 20)
-            wind = curr.get("windspeed", 0)
-            code = curr.get("weathercode", 0)
+            res = requests.get(url, headers=headers, timeout=5).json()
+            curr = res.get("current", {})
+            
+            temp = curr.get("temperature_2m", 20)
+            wind = curr.get("wind_speed_10m", 0)
+            code = curr.get("weather_code", 0)
 
             temps.append(temp)
             winds.append(wind)
@@ -77,7 +81,7 @@ def get_weather_with_advice():
 
             response_text += f"📍 <b>{city}</b>\n• Температура: {temp}°C\n• Ветер: {wind} км/ч\n\n"
         except Exception as e:
-            print(f"Ошибка погоды для {city}: {e}")
+            print(f"Ошибка погоды {city}: {e}")
             response_text += f"📍 <b>{city}</b>: Не удалось получить данные.\n\n"
 
     if temps:
@@ -100,7 +104,7 @@ def get_weather_with_advice():
             advice.append("☔ Ожидается дождь — возьми зонт!")
 
         advice_str = " ".join(advice)
-        response_text += f"💡 <b>Совет по одежде:</b> {advice_str}"
+        response_text += f"💡 <b>Совет по одежде:</b> {advice_str}\n\n"
 
     return response_text + PARTNER_FOOTER
 
