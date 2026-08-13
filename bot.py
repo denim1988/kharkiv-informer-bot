@@ -39,38 +39,57 @@ PARTNER_FOOTER = '\n\n— — — — — — — — — —\n📢 <b>Наш п
 # ==================== 1. ПОГОДА И СОВЕТЫ ====================
 def get_weather_with_advice():
     response_text = "🌤 <b>ПОГОДА</b>\n\n"
-    
+
     cities = {
-        "Харьков": "latitude=50.0011&longitude=36.2315",
-        "Чугуев": "latitude=49.8356&longitude=36.6844",
-        "Харьковская область": "latitude=49.9935&longitude=36.2304"
+        "Харьков": (50.0011, 36.2315),
+        "Чугуев": (49.8356, 36.6844),
+        "Харьковская область": (49.9935, 36.2304)
     }
 
     temps = []
     winds = []
     rain_expected = False
 
-    for city, coords in cities.items():
+    for city, (lat, lon) in cities.items():
         try:
-            url = f"https://api.open-meteo.com/v1/forecast?{coords}&current_weather=true"
-            res = requests.get(url, timeout=5).json()
-            curr = res.get("current_weather", {})
+            url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m,wind_speed_10m,weather_code"
+                f"&timezone=auto"
+            )
 
-            temp = round(float(curr.get("temperature", 0)))
-            wind = round(float(curr.get("windspeed", 0)))
-            code = int(curr.get("weathercode", 0))
+            res = requests.get(url, timeout=10)
+            res.raise_for_status()
+            data = res.json()
+
+            curr = data.get("current", {})
+
+            temp = round(float(curr.get("temperature_2m", 0)))
+            wind = round(float(curr.get("wind_speed_10m", 0)))
+            code = int(curr.get("weather_code", 0))
 
             temps.append(temp)
             winds.append(wind)
 
-            # Коды осадков (дождь/морось/гроза)
-            if code in [51, 53, 55, 61, 63, 65, 80, 81, 82, 95]:
+            # Дождь / морось / ливень / гроза
+            if code in [51, 53, 55, 56, 57,
+                        61, 63, 65, 66, 67,
+                        80, 81, 82,
+                        95, 96, 99]:
                 rain_expected = True
 
-            response_text += f"📍 <b>{city}</b>\n• Температура: {temp}°C\n• Ветер: {wind} км/ч\n\n"
+            response_text += (
+                f"📍 <b>{city}</b>\n"
+                f"• Температура: {temp}°C\n"
+                f"• Ветер: {wind} км/ч\n\n"
+            )
+
         except Exception as e:
             print(f"Ошибка загрузки погоды ({city}): {e}")
-            response_text += f"📍 <b>{city}</b>: Не удалось получить данные\n\n"
+            response_text += (
+                f"📍 <b>{city}</b>: Не удалось получить данные\n\n"
+            )
 
     # Формируем совет по одежде
     if temps:
@@ -78,22 +97,35 @@ def get_weather_with_advice():
         avg_wind = sum(winds) / len(winds)
 
         advice = []
+
         if avg_temp >= 22:
-            advice.append("🩳 Легкая летняя одежда: футболка, шорты/лёгкие брюки.")
+            advice.append(
+                "🩳 Легкая летняя одежда: футболка, шорты/лёгкие брюки."
+            )
         elif 15 <= avg_temp < 22:
-            advice.append("👕 Умеренно тепло: футболка и лёгкая кофта/ветровка.")
+            advice.append(
+                "👕 Умеренно тепло: футболка и лёгкая кофта/ветровка."
+            )
         elif 5 <= avg_temp < 15:
-            advice.append("🧥 Прохладно: надевай куртку или тёплый свитер.")
+            advice.append(
+                "🧥 Прохладно: надевай куртку или тёплый свитер."
+            )
         else:
-            advice.append("🥶 Холодно: тёплая куртка, шапка.")
+            advice.append(
+                "🥶 Холодно: тёплая куртка, шапка."
+            )
 
         if avg_wind > 15:
             advice.append("💨 Сильный ветер.")
+
         if rain_expected:
             advice.append("☔ Ожидается дождь — возьми зонт!")
 
         advice_str = " ".join(advice)
-        response_text += f"💡 <b>Совет по одежде:</b> {advice_str}"
+
+        response_text += (
+            f"💡 <b>Совет по одежде:</b> {advice_str}"
+        )
 
     return response_text + PARTNER_FOOTER
 
