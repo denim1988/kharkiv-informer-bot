@@ -17,64 +17,39 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot is running!"
+    return "Харьков Информер работает!"
 
 
 def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+    app.run(
+        host="0.0.0.0",
+        port=8080
+    )
 
 
-threading.Thread(target=run_flask, daemon=True).start()
+threading.Thread(
+    target=run_flask,
+    daemon=True
+).start()
 
 
 # ============================================================
 # TELEGRAM
 # ============================================================
 
-# Токен берём из Render -> Environment -> BOT_TOKEN
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
     raise RuntimeError(
         "Не найден BOT_TOKEN. "
-        "Добавь BOT_TOKEN в Environment Variables на Render."
+        "Добавь BOT_TOKEN в Render → Environment."
     )
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 
 # ============================================================
-# БЕЗОПАСНАЯ ОТПРАВКА СООБЩЕНИЯ
-# ============================================================
-
-def safe_send_message(chat_id, text, reply_markup=None):
-
-    for attempt in range(3):
-
-        try:
-
-            bot.send_message(
-                chat_id,
-                text,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-                reply_markup=reply_markup
-            )
-
-            return
-
-        except Exception as e:
-
-            print(
-                f"Ошибка отправки "
-                f"(попытка {attempt + 1}/3): {e}"
-            )
-
-            time.sleep(2)
-
-
-# ============================================================
-# ПАРТНЁР
+# ПАРТНЁРСКИЙ ПОДВАЛ
 # ============================================================
 
 PARTNER_FOOTER = (
@@ -88,72 +63,199 @@ PARTNER_FOOTER = (
 
 
 # ============================================================
-# 1. ПОГОДА
+# БЕЗОПАСНАЯ ОТПРАВКА
+# ============================================================
+
+def safe_send_message(
+    chat_id,
+    text,
+    reply_markup=None
+):
+
+    for attempt in range(3):
+
+        try:
+
+            bot.send_message(
+                chat_id,
+                text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_markup=reply_markup
+            )
+
+            return True
+
+        except Exception as e:
+
+            print(
+                f"Ошибка отправки "
+                f"(попытка {attempt + 1}/3): {e}"
+            )
+
+            time.sleep(2)
+
+    return False
+
+
+# ============================================================
+# 🌤 ПОГОДА
 # ============================================================
 
 def get_weather_with_advice():
 
-    response_text = "🌤 <b>ПОГОДА</b>\n\n"
+    print("[ПОГОДА] Запрос погоды")
+
+    response_text = (
+        "🌤 <b>ПОГОДА</b>\n\n"
+    )
 
     cities = {
-        "Харьков": (50.0011, 36.2315),
-        "Чугуев": (49.8356, 36.6844),
-        "Харьковская область": (49.9935, 36.2304)
+        "Харьков": (
+            50.0011,
+            36.2315
+        ),
+        "Чугуев": (
+            49.8356,
+            36.6844
+        ),
+        "Харьковская область": (
+            49.9935,
+            36.2304
+        )
     }
 
     temps = []
     winds = []
     rain_expected = False
 
-    for city, (lat, lon) in cities.items():
+    # ========================================================
+    # ОСНОВНОЙ ЗАПРОС
+    # Сразу получаем все 3 города одним запросом.
+    # ========================================================
 
-        try:
+    try:
 
-            url = (
-                "https://api.open-meteo.com/v1/forecast?"
-                f"latitude={lat}&longitude={lon}"
-                "&current=temperature_2m,"
-                "wind_speed_10m,weather_code"
-                "&timezone=auto"
+        latitudes = ",".join(
+            str(value[0])
+            for value in cities.values()
+        )
+
+        longitudes = ",".join(
+            str(value[1])
+            for value in cities.values()
+        )
+
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={latitudes}"
+            f"&longitude={longitudes}"
+            "&current=temperature_2m,"
+            "wind_speed_10m,"
+            "weather_code"
+            "&timezone=auto"
+            "&wind_speed_unit=kmh"
+        )
+
+        print(
+            f"[ПОГОДА] URL: {url}"
+        )
+
+        response = requests.get(
+            url,
+            timeout=15,
+            headers={
+                "User-Agent":
+                    "KharkivInformerBot/1.0"
+            }
+        )
+
+        print(
+            f"[ПОГОДА] HTTP: "
+            f"{response.status_code}"
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        # При нескольких координатах Open-Meteo
+        # возвращает список объектов.
+        if isinstance(data, dict):
+
+            data = [data]
+
+        city_names = list(
+            cities.keys()
+        )
+
+        if len(data) != len(city_names):
+
+            raise ValueError(
+                "Open-Meteo вернул "
+                f"{len(data)} объектов вместо "
+                f"{len(city_names)}"
             )
 
-            res = requests.get(
-                url,
-                timeout=10
+        for city, weather_data in zip(
+            city_names,
+            data
+        ):
+
+            current = weather_data.get(
+                "current",
+                {}
             )
 
-            res.raise_for_status()
+            temp_value = current.get(
+                "temperature_2m"
+            )
 
-            data = res.json()
+            wind_value = current.get(
+                "wind_speed_10m"
+            )
 
-            curr = data.get("current", {})
-
-            temp_value = curr.get("temperature_2m")
-            wind_value = curr.get("wind_speed_10m")
-            code_value = curr.get("weather_code")
+            code_value = current.get(
+                "weather_code"
+            )
 
             if (
                 temp_value is None
                 or wind_value is None
                 or code_value is None
             ):
+
                 raise ValueError(
-                    f"Нет необходимых данных: {curr}"
+                    f"Нет данных для {city}: "
+                    f"{current}"
                 )
 
-            temp = round(float(temp_value))
-            wind = round(float(wind_value))
-            code = int(code_value)
+            temp = round(
+                float(temp_value)
+            )
+
+            wind = round(
+                float(wind_value)
+            )
+
+            code = int(
+                code_value
+            )
 
             temps.append(temp)
             winds.append(wind)
 
+            # Дождь, морось, ливни, гроза,
+            # снег и другие осадки.
             if code in [
                 51, 53, 55,
                 56, 57,
                 61, 63, 65,
                 66, 67,
+                71, 73, 75,
+                77,
                 80, 81, 82,
+                85, 86,
                 95, 96, 99
             ]:
 
@@ -161,30 +263,165 @@ def get_weather_with_advice():
 
             response_text += (
                 f"📍 <b>{city}</b>\n"
-                f"• Температура: {temp}°C\n"
-                f"• Ветер: {wind} км/ч\n\n"
+                f"• Температура: "
+                f"{temp}°C\n"
+                f"• Ветер: "
+                f"{wind} км/ч\n\n"
             )
 
-        except Exception as e:
+        print(
+            "[ПОГОДА] Основной запрос успешен"
+        )
 
-            print(
-                f"Ошибка загрузки погоды "
-                f"({city}): {e}"
-            )
+    except Exception as main_error:
 
-            response_text += (
-                f"📍 <b>{city}</b>\n"
-                f"• ⚠️ Не удалось получить данные\n\n"
-            )
+        print(
+            "[ПОГОДА] Основной запрос "
+            f"ОШИБКА: {main_error}"
+        )
 
-    # --------------------------------------------------------
+        # ====================================================
+        # РЕЗЕРВНЫЙ СПОСОБ
+        # Запрашиваем города отдельно.
+        # ====================================================
+
+        response_text = (
+            "🌤 <b>ПОГОДА</b>\n\n"
+        )
+
+        temps = []
+        winds = []
+        rain_expected = False
+
+        for city, (
+            latitude,
+            longitude
+        ) in cities.items():
+
+            try:
+
+                fallback_url = (
+                    "https://api.open-meteo.com/v1/forecast"
+                    f"?latitude={latitude}"
+                    f"&longitude={longitude}"
+                    "&current=temperature_2m,"
+                    "wind_speed_10m,"
+                    "weather_code"
+                    "&timezone=auto"
+                    "&wind_speed_unit=kmh"
+                )
+
+                fallback_response = requests.get(
+                    fallback_url,
+                    timeout=15,
+                    headers={
+                        "User-Agent":
+                            "KharkivInformerBot/1.0"
+                    }
+                )
+
+                fallback_response.raise_for_status()
+
+                fallback_data = (
+                    fallback_response.json()
+                )
+
+                current = fallback_data.get(
+                    "current",
+                    {}
+                )
+
+                temp_value = current.get(
+                    "temperature_2m"
+                )
+
+                wind_value = current.get(
+                    "wind_speed_10m"
+                )
+
+                code_value = current.get(
+                    "weather_code"
+                )
+
+                if (
+                    temp_value is None
+                    or wind_value is None
+                    or code_value is None
+                ):
+
+                    raise ValueError(
+                        "В ответе нет current"
+                    )
+
+                temp = round(
+                    float(temp_value)
+                )
+
+                wind = round(
+                    float(wind_value)
+                )
+
+                code = int(
+                    code_value
+                )
+
+                temps.append(temp)
+                winds.append(wind)
+
+                if code in [
+                    51, 53, 55,
+                    56, 57,
+                    61, 63, 65,
+                    66, 67,
+                    71, 73, 75,
+                    77,
+                    80, 81, 82,
+                    85, 86,
+                    95, 96, 99
+                ]:
+
+                    rain_expected = True
+
+                response_text += (
+                    f"📍 <b>{city}</b>\n"
+                    f"• Температура: "
+                    f"{temp}°C\n"
+                    f"• Ветер: "
+                    f"{wind} км/ч\n\n"
+                )
+
+                print(
+                    f"[ПОГОДА] {city}: OK"
+                )
+
+            except Exception as city_error:
+
+                print(
+                    f"[ПОГОДА] {city}: "
+                    f"ОШИБКА: {city_error}"
+                )
+
+                response_text += (
+                    f"📍 <b>{city}</b>\n"
+                    "• ⚠️ Не удалось "
+                    "получить данные\n\n"
+                )
+
+    # ========================================================
     # СОВЕТ ПО ОДЕЖДЕ
-    # --------------------------------------------------------
+    # ========================================================
 
     if temps:
 
-        avg_temp = sum(temps) / len(temps)
-        avg_wind = sum(winds) / len(winds)
+        avg_temp = (
+            sum(temps)
+            / len(temps)
+        )
+
+        avg_wind = (
+            sum(winds)
+            / len(winds)
+        )
 
         advice = []
 
@@ -199,14 +436,16 @@ def get_weather_with_advice():
 
             advice.append(
                 "👕 Умеренно тепло: "
-                "футболка и лёгкая кофта/ветровка."
+                "футболка и лёгкая "
+                "кофта/ветровка."
             )
 
         elif 5 <= avg_temp < 15:
 
             advice.append(
                 "🧥 Прохладно: "
-                "надевай куртку или тёплый свитер."
+                "надевай куртку "
+                "или тёплый свитер."
             )
 
         else:
@@ -237,27 +476,30 @@ def get_weather_with_advice():
     else:
 
         response_text += (
-            "⚠️ <b>Не удалось получить данные "
-            "о погоде.</b>"
+            "⚠️ <b>Не удалось получить "
+            "данные о погоде.</b>\n\n"
+            "Попробуйте нажать кнопку "
+            "«🌤 Погода» ещё раз."
         )
 
-    return response_text + PARTNER_FOOTER
+    return (
+        response_text
+        + PARTNER_FOOTER
+    )
 
 
 # ============================================================
-# 2. КУРСЫ ВАЛЮТ И КРИПТОВАЛЮТ
+# 💵 КУРС ВАЛЮТ
 # ============================================================
 
 def get_currency_rates():
 
     text = (
-        "💵 <b>КУРСЫ ВАЛЮТ И КРИПТОВАЛЮТ</b>\n\n"
+        "💵 <b>КУРСЫ ВАЛЮТ "
+        "И КРИПТОВАЛЮТ</b>\n\n"
     )
 
-    # --------------------------------------------------------
-    # USD — ПриватБанк
-    # --------------------------------------------------------
-
+    # USD
     try:
 
         res = requests.get(
@@ -271,12 +513,12 @@ def get_currency_rates():
             if item.get("ccy") == "USD":
 
                 buy = round(
-                    float(item.get("buy")),
+                    float(item["buy"]),
                     2
                 )
 
                 sale = round(
-                    float(item.get("sale")),
+                    float(item["sale"]),
                     2
                 )
 
@@ -297,29 +539,26 @@ def get_currency_rates():
             "Ошибка загрузки\n"
         )
 
-    # --------------------------------------------------------
-    # EUR — НБУ
-    # --------------------------------------------------------
-
+    # EUR
     try:
 
-        res_eur = requests.get(
+        data = requests.get(
             "https://bank.gov.ua/"
             "NBUStatService/v1/statdirectory/"
             "exchange?valcode=EUR&json",
             timeout=5
         ).json()
 
-        if res_eur:
+        if data:
 
-            eur_rate = round(
-                float(res_eur[0].get("rate")),
+            rate = round(
+                float(data[0]["rate"]),
                 2
             )
 
             text += (
                 f"🇪🇺 <b>EUR/UAH:</b> "
-                f"1 EUR = {eur_rate} грн (НБУ)\n"
+                f"{rate} грн (НБУ)\n"
             )
 
     except Exception as e:
@@ -328,34 +567,26 @@ def get_currency_rates():
             f"Ошибка EUR: {e}"
         )
 
-        text += (
-            "🇪🇺 <b>EUR/UAH:</b> "
-            "Ошибка загрузки\n"
-        )
-
-    # --------------------------------------------------------
-    # PLN — НБУ
-    # --------------------------------------------------------
-
+    # PLN
     try:
 
-        res_pln = requests.get(
+        data = requests.get(
             "https://bank.gov.ua/"
             "NBUStatService/v1/statdirectory/"
             "exchange?valcode=PLN&json",
             timeout=5
         ).json()
 
-        if res_pln:
+        if data:
 
-            pln_rate = round(
-                float(res_pln[0].get("rate")),
+            rate = round(
+                float(data[0]["rate"]),
                 2
             )
 
             text += (
                 f"🇵🇱 <b>PLN/UAH:</b> "
-                f"1 PLN = {pln_rate} грн (НБУ)\n"
+                f"{rate} грн (НБУ)\n"
             )
 
     except Exception as e:
@@ -364,34 +595,26 @@ def get_currency_rates():
             f"Ошибка PLN: {e}"
         )
 
-        text += (
-            "🇵🇱 <b>PLN/UAH:</b> "
-            "Ошибка загрузки\n"
-        )
-
-    # --------------------------------------------------------
-    # CNY — НБУ
-    # --------------------------------------------------------
-
+    # CNY
     try:
 
-        res_cny = requests.get(
+        data = requests.get(
             "https://bank.gov.ua/"
             "NBUStatService/v1/statdirectory/"
             "exchange?valcode=CNY&json",
             timeout=5
         ).json()
 
-        if res_cny:
+        if data:
 
-            cny_rate = round(
-                float(res_cny[0].get("rate")),
+            rate = round(
+                float(data[0]["rate"]),
                 2
             )
 
             text += (
                 f"🇨🇳 <b>CNY/UAH:</b> "
-                f"1 CNY = {cny_rate} грн (НБУ)\n"
+                f"{rate} грн (НБУ)\n"
             )
 
     except Exception as e:
@@ -400,69 +623,52 @@ def get_currency_rates():
             f"Ошибка CNY: {e}"
         )
 
-        text += (
-            "🇨🇳 <b>CNY/UAH:</b> "
-            "Ошибка загрузки\n"
-        )
-
-    # --------------------------------------------------------
-    # КРИПТОВАЛЮТЫ
-    # --------------------------------------------------------
+    # ========================================================
+    # КРИПТА
+    # ========================================================
 
     text += (
-        "\n🪙 <b>Криптовалюты (USD):</b>\n"
+        "\n🪙 <b>Криптовалюты:</b>\n"
     )
 
-    btc_price = 0.0
-    eth_price = 0.0
-    sol_price = 0.0
-    xrp_price = 0.0
+    btc = 0
+    eth = 0
+    sol = 0
+    xrp = 0
 
     try:
 
-        req_btc = requests.get(
-            "https://api.bybit.com/"
-            "v5/market/tickers?"
-            "category=spot&symbol=BTCUSDT",
-            timeout=3
-        ).json()
+        symbols = [
+            "BTCUSDT",
+            "ETHUSDT",
+            "SOLUSDT",
+            "XRPUSDT"
+        ]
 
-        req_eth = requests.get(
-            "https://api.bybit.com/"
-            "v5/market/tickers?"
-            "category=spot&symbol=ETHUSDT",
-            timeout=3
-        ).json()
+        prices = {}
 
-        req_sol = requests.get(
-            "https://api.bybit.com/"
-            "v5/market/tickers?"
-            "category=spot&symbol=SOLUSDT",
-            timeout=3
-        ).json()
+        for symbol in symbols:
 
-        req_xrp = requests.get(
-            "https://api.bybit.com/"
-            "v5/market/tickers?"
-            "category=spot&symbol=XRPUSDT",
-            timeout=3
-        ).json()
+            data = requests.get(
+                "https://api.bybit.com/"
+                "v5/market/tickers",
+                params={
+                    "category": "spot",
+                    "symbol": symbol
+                },
+                timeout=5
+            ).json()
 
-        btc_price = float(
-            req_btc["result"]["list"][0]["lastPrice"]
-        )
+            price = float(
+                data["result"]["list"][0]["lastPrice"]
+            )
 
-        eth_price = float(
-            req_eth["result"]["list"][0]["lastPrice"]
-        )
+            prices[symbol] = price
 
-        sol_price = float(
-            req_sol["result"]["list"][0]["lastPrice"]
-        )
-
-        xrp_price = float(
-            req_xrp["result"]["list"][0]["lastPrice"]
-        )
+        btc = prices["BTCUSDT"]
+        eth = prices["ETHUSDT"]
+        sol = prices["SOLUSDT"]
+        xrp = prices["XRPUSDT"]
 
     except Exception as e:
 
@@ -470,92 +676,73 @@ def get_currency_rates():
             f"Ошибка Bybit: {e}"
         )
 
-        # ----------------------------------------------------
-        # РЕЗЕРВ MEXC
-        # ----------------------------------------------------
-
+        # Резерв MEXC
         try:
 
-            req_btc = requests.get(
-                "https://api.mexc.com/"
-                "api/v3/ticker/price?symbol=BTCUSDT",
-                timeout=3
-            ).json()
+            for symbol, variable in [
+                ("BTCUSDT", "btc"),
+                ("ETHUSDT", "eth"),
+                ("SOLUSDT", "sol"),
+                ("XRPUSDT", "xrp")
+            ]:
 
-            req_eth = requests.get(
-                "https://api.mexc.com/"
-                "api/v3/ticker/price?symbol=ETHUSDT",
-                timeout=3
-            ).json()
+                data = requests.get(
+                    "https://api.mexc.com/"
+                    "api/v3/ticker/price",
+                    params={
+                        "symbol": symbol
+                    },
+                    timeout=5
+                ).json()
 
-            req_sol = requests.get(
-                "https://api.mexc.com/"
-                "api/v3/ticker/price?symbol=SOLUSDT",
-                timeout=3
-            ).json()
+                value = float(
+                    data["price"]
+                )
 
-            req_xrp = requests.get(
-                "https://api.mexc.com/"
-                "api/v3/ticker/price?symbol=XRPUSDT",
-                timeout=3
-            ).json()
+                if variable == "btc":
+                    btc = value
 
-            btc_price = float(
-                req_btc["price"]
-            )
+                elif variable == "eth":
+                    eth = value
 
-            eth_price = float(
-                req_eth["price"]
-            )
+                elif variable == "sol":
+                    sol = value
 
-            sol_price = float(
-                req_sol["price"]
-            )
+                elif variable == "xrp":
+                    xrp = value
 
-            xrp_price = float(
-                req_xrp["price"]
-            )
-
-        except Exception as e:
+        except Exception as mexc_error:
 
             print(
-                f"Ошибка MEXC: {e}"
+                f"Ошибка MEXC: "
+                f"{mexc_error}"
             )
 
-    if btc_price > 0:
+    if btc > 0:
 
         text += (
             f"• <b>BTC:</b> "
-            f"${btc_price:,.2f}\n"
-        )
-
-        text += (
+            f"${btc:,.2f}\n"
             f"• <b>ETH:</b> "
-            f"${eth_price:,.2f}\n"
-        )
-
-        text += (
+            f"${eth:,.2f}\n"
             f"• <b>SOL:</b> "
-            f"${sol_price:,.2f}\n"
-        )
-
-        text += (
+            f"${sol:,.2f}\n"
             f"• <b>XRP:</b> "
-            f"${xrp_price:,.4f}\n"
+            f"${xrp:,.4f}\n"
         )
 
     else:
 
         text += (
             "• Не удалось загрузить "
-            "курсы криптовалют\n"
+            "криптовалюты\n"
         )
 
     return text + PARTNER_FOOTER
 
 
 # ============================================================
-# 3. РЕЛИГИЯ
+# ☦️ РЕЛИГИЯ
 # ============================================================
 
 def get_religion_info():
@@ -568,7 +755,7 @@ def get_religion_info():
         '• <a href="https://church.ua/">'
         "Сайт УПЦ</a>\n"
         '• <a href="https://t.me/upc_news">'
-        "Официальный Telegram УПЦ</a>\n\n"
+        "Telegram УПЦ</a>\n\n"
         "💡 <i>Молитвы, Евангелие дня, "
         "церковный календарь и новости.</i>"
     )
@@ -577,50 +764,31 @@ def get_religion_info():
 
 
 # ============================================================
-# 4. АФИША ХАРЬКОВА
+# 🎭 АФИША
 # ============================================================
 
 def get_kharkiv_events():
 
     text = (
         "🎭 <b>АФИША ХАРЬКОВ</b>\n\n"
-    )
-
-    text += (
         "🎟 <b>Спектакли, концерты, "
-        "шоу и театры:</b>\n"
-    )
-
-    text += (
+        "шоу и театры:</b>\n\n"
         '• <a href="https://kharkiv.internet-bilet.ua/">'
         "Internet-Bilet</a>\n"
-    )
-
-    text += (
         '• <a href="https://kharkiv.karabas.com/ru/">'
         "Karabas</a>\n\n"
-    )
-
-    text += (
-        "🎬 <b>Кино:</b>\n"
-    )
-
-    text += (
+        "🎬 <b>Кино:</b>\n\n"
         '• <a href="https://multiplex.ua/cinema/kharkiv/nikolsky">'
-        "Multiplex — ТРЦ Никольский</a>\n\n"
-    )
-
-    text += (
-        "💡 <i>Нажмите на ссылку, "
-        "чтобы открыть расписание "
-        "и купить билеты.</i>"
+        "Multiplex — Никольский</a>\n\n"
+        "💡 <i>Откройте ссылку, "
+        "чтобы посмотреть расписание.</i>"
     )
 
     return text + PARTNER_FOOTER
 
 
 # ============================================================
-# 🏛 5. ГОСУСЛУГИ
+# 🏛 ГОСУСЛУГИ
 # ============================================================
 
 def send_gosuslugi(chat_id):
@@ -632,7 +800,7 @@ def send_gosuslugi(chat_id):
     keyboard.add(
         types.InlineKeyboardButton(
             "📋 Запись в ЦНАП",
-            url="https://dozvil.kh.ua/queue/form"
+            url="https://dozvil.kh.ua/"
         )
     )
 
@@ -652,7 +820,7 @@ def send_gosuslugi(chat_id):
 
     keyboard.add(
         types.InlineKeyboardButton(
-            "🪪 ДМС — электронные услуги",
+            "🪪 ДМС — услуги",
             url="https://dmsu.gov.ua/"
         )
     )
@@ -666,7 +834,7 @@ def send_gosuslugi(chat_id):
 
     keyboard.add(
         types.InlineKeyboardButton(
-            "⚖️ Минюст Харьковщины",
+            "⚖️ Минюст",
             url="https://kharkivjust.gov.ua/"
         )
     )
@@ -687,21 +855,21 @@ def send_gosuslugi(chat_id):
 
     text = (
         "🏛 <b>ГОСУСЛУГИ ХАРЬКОВА</b>\n\n"
-        "📋 <b>Документы и административные услуги</b>\n"
-        "ЦНАП, паспорта, городские и областные "
-        "органы власти.\n\n"
+        "📋 <b>Документы и административные услуги</b>\n\n"
+        "Здесь собраны основные городские "
+        "и государственные сервисы Харькова.\n\n"
         "Выберите нужный сервис:"
     )
 
     safe_send_message(
         chat_id,
-        text,
+        text + PARTNER_FOOTER,
         keyboard
     )
 
 
 # ============================================================
-# 🚇 6. ТРАНСПОРТ
+# 🚇 ТРАНСПОРТ
 # ============================================================
 
 def send_transport(chat_id):
@@ -757,10 +925,9 @@ def send_transport(chat_id):
         "🚌 <b>Городской транспорт</b>\n"
         "Карта маршрутов и движение транспорта.\n\n"
         "🚇 <b>Метро</b>\n"
-        "Официальный сайт и информация "
-        "Харьковского метрополитена.\n\n"
+        "Информация Харьковского метрополитена.\n\n"
         "🚆 <b>Железная дорога</b>\n"
-        "Билеты, табло и задержки поездов.\n\n"
+        "Билеты и информация о поездах.\n\n"
         "🚌 <b>Автобусы</b>\n"
         "Поиск и покупка билетов.\n\n"
         "Выберите нужный сервис:"
@@ -768,13 +935,13 @@ def send_transport(chat_id):
 
     safe_send_message(
         chat_id,
-        text,
+        text + PARTNER_FOOTER,
         keyboard
     )
 
 
 # ============================================================
-# 🏥 7. МЕДИЦИНА
+# 🏥 МЕДИЦИНА
 # ============================================================
 
 def send_medicine(chat_id):
@@ -783,7 +950,6 @@ def send_medicine(chat_id):
         row_width=1
     )
 
-    # 103
     keyboard.add(
         types.InlineKeyboardButton(
             "🚑 103 — скорая помощь",
@@ -791,7 +957,6 @@ def send_medicine(chat_id):
         )
     )
 
-    # 112
     keyboard.add(
         types.InlineKeyboardButton(
             "🆘 112 — экстренная помощь",
@@ -799,7 +964,6 @@ def send_medicine(chat_id):
         )
     )
 
-    # Медицинский портал Харькова
     keyboard.add(
         types.InlineKeyboardButton(
             "🏥 Медучреждения Харькова",
@@ -807,7 +971,6 @@ def send_medicine(chat_id):
         )
     )
 
-    # Поиск лекарств
     keyboard.add(
         types.InlineKeyboardButton(
             "💊 Поиск лекарств и аптек",
@@ -815,7 +978,6 @@ def send_medicine(chat_id):
         )
     )
 
-    # НСЗУ
     keyboard.add(
         types.InlineKeyboardButton(
             "🩺 НСЗУ — найти врача",
@@ -823,7 +985,6 @@ def send_medicine(chat_id):
         )
     )
 
-    # МОЗ
     keyboard.add(
         types.InlineKeyboardButton(
             "📞 МОЗ Украины",
@@ -839,19 +1000,19 @@ def send_medicine(chat_id):
         "💊 <b>Аптеки и лекарства</b>\n"
         "Поиск препаратов и аптек.\n\n"
         "🏥 <b>Медучреждения</b>\n"
-        "Официальный медицинский портал Харькова.\n\n"
+        "Медицинские сервисы Харькова.\n\n"
         "Выберите нужный сервис:"
     )
 
     safe_send_message(
         chat_id,
-        text,
+        text + PARTNER_FOOTER,
         keyboard
     )
 
 
 # ============================================================
-# 🏠 8. ЖКХ
+# 🏠 ЖКХ
 # ============================================================
 
 def send_zhkh(chat_id):
@@ -860,7 +1021,6 @@ def send_zhkh(chat_id):
         row_width=1
     )
 
-    # 1562
     keyboard.add(
         types.InlineKeyboardButton(
             "📞 1562 — диспетчерская",
@@ -875,7 +1035,6 @@ def send_zhkh(chat_id):
         )
     )
 
-    # Электричество
     keyboard.add(
         types.InlineKeyboardButton(
             "⚡ Харьковоблэнерго",
@@ -885,20 +1044,11 @@ def send_zhkh(chat_id):
 
     keyboard.add(
         types.InlineKeyboardButton(
-            "⚡ Контакты Харьковоблэнерго",
-            callback_data="zhkh_energy"
-        )
-    )
-
-    # Вода
-    keyboard.add(
-        types.InlineKeyboardButton(
             "💧 Харьковводоканал",
             url="https://vodokanal.kharkov.ua/"
         )
     )
 
-    # Газ
     keyboard.add(
         types.InlineKeyboardButton(
             "🔥 Газ / Нафтогаз",
@@ -906,7 +1056,6 @@ def send_zhkh(chat_id):
         )
     )
 
-    # Город
     keyboard.add(
         types.InlineKeyboardButton(
             "🏙 Харьковский горсовет",
@@ -923,13 +1072,13 @@ def send_zhkh(chat_id):
         "💧 <b>Вода</b>\n"
         "Харьковводоканал.\n\n"
         "🔥 <b>Газ</b>\n"
-        "Газовые услуги и Нафтогаз.\n\n"
+        "Газовые услуги.\n\n"
         "Выберите нужную службу:"
     )
 
     safe_send_message(
         chat_id,
-        text,
+        text + PARTNER_FOOTER,
         keyboard
     )
 
@@ -942,40 +1091,27 @@ def send_zhkh(chat_id):
     func=lambda call: call.data in [
         "medical_103",
         "medical_112",
-        "zhkh_1562",
-        "zhkh_energy"
+        "zhkh_1562"
     ]
 )
-def handle_service_callback(call):
-
-    # --------------------------------------------------------
-    # 103
-    # --------------------------------------------------------
+def handle_callback(call):
 
     if call.data == "medical_103":
 
         text = (
             "🚑 <b>СКОРАЯ ПОМОЩЬ</b>\n\n"
             "📞 <b>103</b>\n\n"
-            "При необходимости экстренной "
-            "медицинской помощи звоните 103."
+            "Экстренная медицинская помощь."
         )
-
-    # --------------------------------------------------------
-    # 112
-    # --------------------------------------------------------
 
     elif call.data == "medical_112":
 
         text = (
-            "🆘 <b>ЕДИНЫЙ НОМЕР ЭКСТРЕННОЙ ПОМОЩИ</b>\n\n"
+            "🆘 <b>ЕДИНЫЙ НОМЕР "
+            "ЭКСТРЕННОЙ ПОМОЩИ</b>\n\n"
             "📞 <b>112</b>\n\n"
             "Единый номер экстренной помощи."
         )
-
-    # --------------------------------------------------------
-    # 1562
-    # --------------------------------------------------------
 
     elif call.data == "zhkh_1562":
 
@@ -984,7 +1120,7 @@ def handle_service_callback(call):
             "📞 <b>15-62</b>\n\n"
             "По вопросам коммунальных проблем:\n\n"
             "• 💧 вода\n"
-            "• 🔥 отопление и газ\n"
+            "• 🔥 отопление\n"
             "• ⚡ электричество\n"
             "• 🛗 лифты\n"
             "• 🏠 содержание домов\n"
@@ -993,22 +1129,10 @@ def handle_service_callback(call):
             "через портал 1562."
         )
 
-    # --------------------------------------------------------
-    # Харьковоблэнерго
-    # --------------------------------------------------------
-
     else:
 
         text = (
-            "⚡ <b>ХАРЬКОВОБЛЭНЕРГО</b>\n\n"
-            "Контакт-центр:\n\n"
-            "📞 <b>0 800 508 413</b>\n"
-            "📞 <b>050 05 40 413</b>\n"
-            "📞 <b>067 23 40 413</b>\n"
-            "📞 <b>063 05 40 413</b>\n\n"
-            "Для актуальной информации "
-            "об отключениях и других вопросах "
-            "используйте официальный сайт."
+            "⚠️ Информация временно недоступна."
         )
 
     bot.answer_callback_query(
@@ -1017,12 +1141,12 @@ def handle_service_callback(call):
 
     safe_send_message(
         call.message.chat.id,
-        text
+        text + PARTNER_FOOTER
     )
 
 
 # ============================================================
-# 9. ГЛАВНОЕ МЕНЮ
+# 🚀 /START
 # ============================================================
 
 @bot.message_handler(
@@ -1035,63 +1159,31 @@ def start(message):
         row_width=2
     )
 
-    # --------------------------------------------------------
-    # РЯД 1
-    # --------------------------------------------------------
-
-    btn1 = types.KeyboardButton(
-        "🌤 Погода"
-    )
-
-    btn2 = types.KeyboardButton(
-        "💵 Курс валют"
-    )
-
-    # --------------------------------------------------------
-    # РЯД 2
-    # --------------------------------------------------------
-
-    btn3 = types.KeyboardButton(
-        "🚇 Транспорт"
-    )
-
-    btn4 = types.KeyboardButton(
-        "🎭 Афиша Харьков"
-    )
-
-    # --------------------------------------------------------
-    # РЯД 3
-    # --------------------------------------------------------
-
-    btn5 = types.KeyboardButton(
-        "🏛 Госуслуги"
-    )
-
-    btn6 = types.KeyboardButton(
-        "🏠 ЖКХ"
-    )
-
-    # --------------------------------------------------------
-    # РЯД 4
-    # --------------------------------------------------------
-
-    btn7 = types.KeyboardButton(
-        "🏥 Медицина"
-    )
-
-    btn8 = types.KeyboardButton(
-        "☦️ Религия"
-    )
-
     markup.add(
-        btn1,
-        btn2,
-        btn3,
-        btn4,
-        btn5,
-        btn6,
-        btn7,
-        btn8
+        types.KeyboardButton(
+            "🌤 Погода"
+        ),
+        types.KeyboardButton(
+            "💵 Курс валют"
+        ),
+        types.KeyboardButton(
+            "🚇 Транспорт"
+        ),
+        types.KeyboardButton(
+            "🎭 Афиша Харьков"
+        ),
+        types.KeyboardButton(
+            "🏛 Госуслуги"
+        ),
+        types.KeyboardButton(
+            "🏠 ЖКХ"
+        ),
+        types.KeyboardButton(
+            "🏥 Медицина"
+        ),
+        types.KeyboardButton(
+            "☦️ Религия"
+        )
     )
 
     bot.send_message(
@@ -1102,7 +1194,7 @@ def start(message):
 
 
 # ============================================================
-# 10. ОБРАБОТКА КНОПОК
+# 🔘 ОБРАБОТКА КНОПОК
 # ============================================================
 
 @bot.message_handler(
@@ -1123,18 +1215,20 @@ def handle_buttons(message):
     if "погода" in text:
 
         print(
-            "[БОТ] Запрос погоды"
+            "[БОТ] Нажата кнопка Погода"
         )
 
-        res = get_weather_with_advice()
+        result = (
+            get_weather_with_advice()
+        )
 
         safe_send_message(
             message.chat.id,
-            res
+            result
         )
 
     # --------------------------------------------------------
-    # ВАЛЮТЫ
+    # КУРС ВАЛЮТ
     # --------------------------------------------------------
 
     elif (
@@ -1143,14 +1237,16 @@ def handle_buttons(message):
     ):
 
         print(
-            "[БОТ] Запрос курса валют"
+            "[БОТ] Нажата кнопка Курс валют"
         )
 
-        res = get_currency_rates()
+        result = (
+            get_currency_rates()
+        )
 
         safe_send_message(
             message.chat.id,
-            res
+            result
         )
 
     # --------------------------------------------------------
@@ -1160,7 +1256,7 @@ def handle_buttons(message):
     elif "транспорт" in text:
 
         print(
-            "[БОТ] Открыт раздел транспорта"
+            "[БОТ] Нажата кнопка Транспорт"
         )
 
         send_transport(
@@ -1174,14 +1270,16 @@ def handle_buttons(message):
     elif "афиша" in text:
 
         print(
-            "[БОТ] Открыта афиша"
+            "[БОТ] Нажата кнопка Афиша"
         )
 
-        res = get_kharkiv_events()
+        result = (
+            get_kharkiv_events()
+        )
 
         safe_send_message(
             message.chat.id,
-            res
+            result
         )
 
     # --------------------------------------------------------
@@ -1191,7 +1289,7 @@ def handle_buttons(message):
     elif "госуслуги" in text:
 
         print(
-            "[БОТ] Открыты госуслуги"
+            "[БОТ] Нажата кнопка Госуслуги"
         )
 
         send_gosuslugi(
@@ -1205,7 +1303,7 @@ def handle_buttons(message):
     elif "жкх" in text:
 
         print(
-            "[БОТ] Открыт раздел ЖКХ"
+            "[БОТ] Нажата кнопка ЖКХ"
         )
 
         send_zhkh(
@@ -1219,7 +1317,7 @@ def handle_buttons(message):
     elif "медицина" in text:
 
         print(
-            "[БОТ] Открыта медицина"
+            "[БОТ] Нажата кнопка Медицина"
         )
 
         send_medicine(
@@ -1233,33 +1331,35 @@ def handle_buttons(message):
     elif "религия" in text:
 
         print(
-            "[БОТ] Открыта религия"
+            "[БОТ] Нажата кнопка Религия"
         )
 
-        res = get_religion_info()
+        result = (
+            get_religion_info()
+        )
 
         safe_send_message(
             message.chat.id,
-            res
+            result
         )
 
 
 # ============================================================
-# 11. ЗАПУСК
+# ▶️ ЗАПУСК
 # ============================================================
 
 if __name__ == "__main__":
 
     print(
-        "========================================"
+        "================================"
     )
 
     print(
-        "      ХАРЬКОВ ИНФОРМЕР ЗАПУЩЕН"
+        "    ХАРЬКОВ ИНФОРМЕР ЗАПУЩЕН"
     )
 
     print(
-        "========================================"
+        "================================"
     )
 
     print(
@@ -1295,7 +1395,7 @@ if __name__ == "__main__":
     )
 
     print(
-        "========================================"
+        "================================"
     )
 
     while True:
@@ -1305,17 +1405,17 @@ if __name__ == "__main__":
             bot.polling(
                 none_stop=True,
                 interval=2,
-                timeout=15
+                timeout=20
             )
 
         except Exception as e:
 
             print(
-                f"Ошибка соединения: {e}"
+                f"Ошибка Telegram: {e}"
             )
 
             print(
-                "Перезапуск через 3 секунды..."
+                "Перезапуск через 5 секунд..."
             )
 
-            time.sleep(3)
+            time.sleep(5)
