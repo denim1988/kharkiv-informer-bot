@@ -34,7 +34,7 @@ threading.Thread(target=run_flask, daemon=True).start()
 # Токен ОБЯЗАТЕЛЬНО должен быть в Render:
 # Environment -> Environment Variables -> BOT_TOKEN
 
-BOT_TOKEN = os.getenv("8423812452:AAGUhfeGS9sIY0A_TsbHd3V2ZkA3vS_EeQk")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
     raise RuntimeError(
