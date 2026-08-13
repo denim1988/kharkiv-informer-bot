@@ -1,6 +1,12 @@
 import threading
+import time
+import os
 from flask import Flask
+import requests
+import telebot
+from telebot import types
 
+# ==================== Flask для Render ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -11,39 +17,24 @@ def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 threading.Thread(target=run_flask, daemon=True).start()
-import time
-import requests
-import telebot
-from telebot import types
-from telebot import apihelper
 
 # ==================== НАСТРОЙКА ====================
-BOT_TOKEN = "8423812452:AAGUhfeGS9sIY0A_TsbHd3V2ZkA3vS_EeQk"  # Твой токен
-
-# Настройка прокси для PythonAnywhere
-# apihelper.proxy = {'https': 'http://proxy.server:3128'}
+# Токен подтягивается из Render (Environment Variables) или берется дефолтный
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8423812452:AAGUhfeGS9sIY0A_TsbHd3V2ZkA3vS_EeQk")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Безопасная функция отправки сообщений (защита от лагов прокси)
+# Безопасная функция отправки сообщений
 def safe_send_message(chat_id, text):
     for attempt in range(3):
         try:
             bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
             break
         except Exception as e:
-            print(f"Мигнул прокси при отправке (попытка {attempt+1}/3)...")
+            print(f"Ошибка отправки (попытка {attempt+1}/3): {e}")
             time.sleep(2)
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-}
-
 PARTNER_FOOTER = '\n\n— — — — — — — — — —\n📢 <b>Наш партнёр:</b> <a href="https://t.me/kuplyu_prodam_kh">Куплю Продам</a>'
-#PARTNER_FOOTER = (
-#    '\n\n— — — — — — — — — —\n'
-#    '🤖 <b>Наш бот:</b> <a href="https://t.me/super_kh_bot">Харьков Информер</a>\n'
-#    '📢 <b>Наш партнёр:</b> <a href="https://t.me/kuplyu_prodam_kh">Куплю Продам</a>')
 
 # ==================== 1. ПОГОДА И СОВЕТЫ ====================
 def get_weather_with_advice():
@@ -64,9 +55,7 @@ def get_weather_with_advice():
 
     for city, (lat, lon) in cities.items():
         try:
-            # Используем актуальный эндпоинт Open-Meteo
             url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,weather_code&timezone=auto"
-            
             res = requests.get(url, headers=headers, timeout=5).json()
             curr = res.get("current", {})
             
@@ -125,12 +114,12 @@ def get_currency_rates():
 
     # 2. Евро (EUR) из НБУ
     try:
-        res_cny = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=CNY&json", timeout=5).json()
-        if res_cny:
-            cny_rate = round(float(res_cny[0].get('rate')), 2)
-            text += f"🇨🇳 <b>EUR/UAH (Евро):</b> 1 EUR = {cny_rate} грн (НБУ)\n"
+        res_eur = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=EUR&json", timeout=5).json()
+        if res_eur:
+            eur_rate = round(float(res_eur[0].get('rate')), 2)
+            text += f"🇪🇺 <b>EUR/UAH (Евро):</b> 1 EUR = {eur_rate} грн (НБУ)\n"
     except Exception:
-        text += "🇨🇳 <b>EUR/UAH:</b> Ошибка загрузки\n"
+        text += "🇪🇺 <b>EUR/UAH:</b> Ошибка загрузки\n"
 
     # 3. Злотый (PLN) из НБУ
     try:
@@ -152,10 +141,9 @@ def get_currency_rates():
 
     text += "\n🪙 <b>Криптовалюты (USD):</b>\n"
 
-# 4. Криптовалюты (Bybit -> MEXC -> CoinGecko)
+    # 5. Криптовалюты (Bybit -> MEXC)
     btc_price, eth_price, sol_price, xrp_price = 0.0, 0.0, 0.0, 0.0
 
-    # Попытка 1: Bybit
     try:
         req_btc = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT", timeout=3).json()
         req_eth = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=ETHUSDT", timeout=3).json()
@@ -167,7 +155,6 @@ def get_currency_rates():
         sol_price = float(req_sol['result']['list'][0]['lastPrice'])
         xrp_price = float(req_xrp['result']['list'][0]['lastPrice'])
     except Exception:
-        # Попытка 2: MEXC (если Bybit не ответил)
         try:
             req_btc = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3).json()
             req_eth = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT", timeout=3).json()
@@ -204,14 +191,11 @@ def get_orthodox_info():
 # ==================== 4. АФИША ХАРЬКОВ ====================
 def get_kharkiv_events():
     text = "🎭 <b>АФИША ХАРЬКОВ</b>\n\n"
-
     text += "🎟 <b>Спектакли, Концерты, Шоу и Театры:</b>\n"
     text += "• <a href=\"https://kharkiv.internet-bilet.ua/\">Афиша Internet-Bilet</a>\n"
     text += "• <a href=\"https://kharkiv.karabas.com/ru/\">Афиша Karabas</a>\n\n"
-
     text += "🎬 <b>Кинотеатр Multiplex в ТРЦ Никольский:</b>\n"
     text += "• <a href=\"https://multiplex.ua/cinema/kharkiv/nikolsky\">Расписание сеансов и билеты</a>\n\n"
-
     text += "💡 <i>Нажмите на нужную ссылку, чтобы открыть расписание и купить билеты.</i>"
     return text + PARTNER_FOOTER
 
@@ -219,12 +203,10 @@ def get_kharkiv_events():
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-
     btn1 = types.KeyboardButton("🌤 Погода")
     btn2 = types.KeyboardButton("💵 Курс валют")
     btn3 = types.KeyboardButton("☦️ Православие")
     btn4 = types.KeyboardButton("🎭 Афиша Харьков")
-
     markup.add(btn1, btn2, btn3, btn4)
     bot.send_message(message.chat.id, "Приветствует Харьков Информер!", reply_markup=markup)
 
@@ -247,13 +229,13 @@ def handle_buttons(message):
     elif "афиша" in text:
         res = get_kharkiv_events()
         safe_send_message(message.chat.id, res)
+
 # ==================== ЗАПУСК ====================
 if __name__ == '__main__':
     print("Бот запущен!")
-
     while True:
         try:
             bot.polling(none_stop=True, interval=2, timeout=15)
         except Exception as e:
-            print(f"Мигнул прокси ({e}), перезапуск через 3 сек...")
+            print(f"Ошибка соединения ({e}), перезапуск через 3 сек...")
             time.sleep(3)
