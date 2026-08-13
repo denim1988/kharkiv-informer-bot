@@ -82,122 +82,143 @@ PARTNER_FOOTER = (
 # ============================================================
 # 5. ПОГОДА И СОВЕТЫ
 # ============================================================
-
 def get_weather_with_advice():
-
-    print("[ПОГОДА] Начинаю получение погоды...")
+    """
+    Получает текущую погоду через wttr.in.
+    Запрос выполняется ТОЛЬКО при нажатии кнопки "🌤 Погода".
+    Автоматического обновления нет.
+    """
 
     response_text = "🌤 <b>ПОГОДА</b>\n\n"
 
     cities = {
-        "Харьков": (50.0011, 36.2315),
-        "Чугуев": (49.8356, 36.6844),
-        "Харьковская область": (49.9935, 36.2304)
+        "Харьков": "Kharkiv",
+        "Чугуев": "Chuhuiv",
+        "Харьковская область": "Kharkiv"
     }
 
     temps = []
     winds = []
     rain_expected = False
 
-    for city, (lat, lon) in cities.items():
+    for city, location in cities.items():
 
         try:
-
-            print(f"[ПОГОДА] Запрашиваю данные для: {city}")
+            print(f"[ПОГОДА] Получаю данные: {city}")
 
             url = (
-                "https://api.open-meteo.com/v1/forecast"
-                f"?latitude={lat}"
-                f"&longitude={lon}"
-                "&current=temperature_2m,wind_speed_10m,weather_code"
-                "&temperature_unit=celsius"
-                "&wind_speed_unit=kmh"
-                "&timezone=auto"
+                f"https://wttr.in/{location}"
+                "?format=j1"
+                "&m"
+                "&lang=ru"
             )
 
-            print(f"[ПОГОДА] URL для {city}: {url}")
+            headers = {
+                "User-Agent": "KharkivInformerBot/1.0"
+            }
 
-            # Запрос к Open-Meteo
-            res = requests.get(url, timeout=10)
+            res = requests.get(
+                url,
+                headers=headers,
+                timeout=15
+            )
 
             print(
-                f"[ПОГОДА] {city} HTTP статус: {res.status_code}"
+                f"[ПОГОДА] {city}: HTTP {res.status_code}"
             )
 
-            # Если сервер вернул ошибку
             res.raise_for_status()
 
-            # Получаем JSON
             data = res.json()
 
-            print(
-                f"[ПОГОДА] Ответ Open-Meteo для {city}: {data}"
+            # Текущие условия
+            current = data.get("current_condition")
+
+            if not current:
+                raise ValueError(
+                    "В ответе отсутствует current_condition"
+                )
+
+            current = current[0]
+
+            # Температура
+            temp = int(
+                float(current.get("temp_C"))
             )
 
-            # Получаем блок current
-            curr = data.get("current")
-
-            if not curr:
-                raise ValueError(
-                    f"Open-Meteo не вернул блок current: {data}"
-                )
-
-            print(
-                f"[ПОГОДА] current для {city}: {curr}"
+            # Ощущается
+            feels_like = int(
+                float(current.get("FeelsLikeC"))
             )
 
-            # Получаем необходимые значения
-            temp_value = curr.get("temperature_2m")
-            wind_value = curr.get("wind_speed_10m")
-            code_value = curr.get("weather_code")
-
-            # НЕ подставляем нули.
-            # Если данных нет — вызываем ошибку.
-            if temp_value is None:
-                raise ValueError(
-                    f"Нет temperature_2m: {curr}"
-                )
-
-            if wind_value is None:
-                raise ValueError(
-                    f"Нет wind_speed_10m: {curr}"
-                )
-
-            if code_value is None:
-                raise ValueError(
-                    f"Нет weather_code: {curr}"
-                )
-
-            # Преобразуем данные
-            temp = round(float(temp_value))
-            wind = round(float(wind_value))
-            code = int(code_value)
-
-            print(
-                f"[ПОГОДА] {city}: "
-                f"{temp}°C, ветер {wind} км/ч, код {code}"
+            # Ветер
+            wind = int(
+                float(current.get("windspeedKmph"))
             )
 
-            # Сохраняем для среднего значения
+            # Влажность
+            humidity = int(
+                float(current.get("humidity"))
+            )
+
+            # Давление
+            pressure = current.get("pressure")
+
+            # Облачность
+            cloud = current.get("cloudcover")
+
+            # Описание
+            weather_desc = current.get(
+                "lang_ru",
+                current.get("weatherDesc", [])
+            )
+
+            if weather_desc:
+                description = weather_desc[0].get(
+                    "value",
+                    ""
+                )
+            else:
+                description = ""
+
+            # Осадки
+            precip = float(
+                current.get("precipMM", 0)
+            )
+
+            if precip > 0:
+                rain_expected = True
+
             temps.append(temp)
             winds.append(wind)
 
-            # Коды дождя / мороси / ливней / грозы
-            if code in [
-                51, 53, 55,
-                56, 57,
-                61, 63, 65,
-                66, 67,
-                80, 81, 82,
-                95, 96, 99
-            ]:
-                rain_expected = True
+            # Emoji состояния погоды
+            if precip > 0:
+                weather_icon = "🌧️"
+            elif cloud is not None and int(cloud) >= 70:
+                weather_icon = "☁️"
+            elif cloud is not None and int(cloud) >= 30:
+                weather_icon = "🌤️"
+            else:
+                weather_icon = "☀️"
 
-            # Добавляем город в сообщение
             response_text += (
                 f"📍 <b>{city}</b>\n"
-                f"• Температура: {temp}°C\n"
-                f"• Ветер: {wind} км/ч\n\n"
+                f"{weather_icon} {description}\n"
+                f"• 🌡 Температура: <b>{temp}°C</b>\n"
+                f"• 🤔 Ощущается: {feels_like}°C\n"
+                f"• 💨 Ветер: {wind} км/ч\n"
+                f"• 💧 Влажность: {humidity}%\n"
+                f"• 🌧 Осадки: {precip} мм\n"
+                f"• ☁️ Облачность: {cloud}%\n"
+                f"• 📊 Давление: {pressure} hPa\n\n"
+            )
+
+            print(
+                f"[ПОГОДА] {city}: "
+                f"{temp}°C, "
+                f"ощущается {feels_like}°C, "
+                f"ветер {wind} км/ч"
             )
 
         except Exception as e:
@@ -208,11 +229,11 @@ def get_weather_with_advice():
 
             response_text += (
                 f"📍 <b>{city}</b>\n"
-                f"• ⚠️ Не удалось получить данные\n\n"
+                f"⚠️ Не удалось получить данные\n\n"
             )
 
     # ========================================================
-    # СОВЕТ ПО ОДЕЖДЕ
+    # СОВЕТ
     # ========================================================
 
     if temps:
@@ -222,60 +243,69 @@ def get_weather_with_advice():
 
         advice = []
 
-        if avg_temp >= 22:
+        if avg_temp >= 25:
 
             advice.append(
-                "🩳 Легкая летняя одежда: "
-                "футболка, шорты/лёгкие брюки."
+                "🩳 Жарко — лёгкая летняя одежда."
             )
 
-        elif 15 <= avg_temp < 22:
+        elif avg_temp >= 22:
 
             advice.append(
-                "👕 Умеренно тепло: "
-                "футболка и лёгкая кофта/ветровка."
+                "👕 Тепло — футболка и лёгкие брюки/шорты."
             )
 
-        elif 5 <= avg_temp < 15:
+        elif avg_temp >= 15:
 
             advice.append(
-                "🧥 Прохладно: "
-                "надевай куртку или тёплый свитер."
+                "🧥 Умеренно тепло — футболка + лёгкая кофта."
+            )
+
+        elif avg_temp >= 5:
+
+            advice.append(
+                "🧥 Прохладно — куртка или тёплая кофта."
             )
 
         else:
 
             advice.append(
-                "🥶 Холодно: "
-                "тёплая куртка, шапка."
+                "🥶 Холодно — нужна тёплая одежда."
             )
 
-        if avg_wind > 15:
-            advice.append("💨 Сильный ветер.")
+        if avg_wind >= 20:
+
+            advice.append(
+                "💨 Сильный ветер — учитывай это при выходе."
+            )
+
+        elif avg_wind >= 12:
+
+            advice.append(
+                "💨 На улице ветрено."
+            )
 
         if rain_expected:
+
             advice.append(
-                "☔ Ожидается дождь — возьми зонт!"
+                "☔ Есть осадки — лучше взять зонт."
             )
 
-        advice_str = " ".join(advice)
-
         response_text += (
-            f"💡 <b>Совет по одежде:</b> "
-            f"{advice_str}"
+            "💡 <b>Совет:</b> "
+            + " ".join(advice)
         )
 
     else:
 
         response_text += (
-            "⚠️ <b>Не удалось получить данные о погоде.</b>"
+            "⚠️ <b>Не удалось получить данные "
+            "о погоде.</b>"
         )
 
-    print("[ПОГОДА] Формирование сообщения завершено.")
+    print("[ПОГОДА] Запрос завершён.")
 
     return response_text + PARTNER_FOOTER
-
-
 # ============================================================
 # 6. КУРСЫ ВАЛЮТ И КРИПТОВАЛЮТ
 # ============================================================
